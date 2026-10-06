@@ -1,0 +1,5 @@
+# Never commit tokens
+.env
+.env.*
+!.env.example
+*.pat

@@ -1,0 +1,17 @@
+# Shared template. new-runner.ps1 copies this file into every per-repo folder.
+# Scale with: docker compose up -d --scale runner=N
+services:
+  runner:
+    image: myoung34/github-runner:latest
+    restart: unless-stopped
+    environment:
+      REPO_URL: ${REPO_URL:?set REPO_URL in .env}
+      ACCESS_TOKEN: ${ACCESS_TOKEN:?set ACCESS_TOKEN in .env}
+      RUNNER_SCOPE: repo
+      EPHEMERAL: "true"                 # fresh runner (and state) for every job
+      RANDOM_RUNNER_SUFFIX: "true"      # unique names when scaled
+      RUNNER_NAME_PREFIX: ${COMPOSE_PROJECT_NAME:-runner}
+      LABELS: ${RUNNER_LABELS:-self-hosted,linux,docker}
+      RUNNER_WORKDIR: /tmp/runner/work  # container-local, no clash between replicas
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
