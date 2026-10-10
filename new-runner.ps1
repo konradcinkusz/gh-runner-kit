@@ -12,17 +12,25 @@
   .\new-runner.ps1 scale -Repo LOGIN/my-repo -Count 1
   .\new-runner.ps1 down  -Repo LOGIN/my-repo
   .\new-runner.ps1 prune -Repo LOGIN/my-repo               # down + delete folder
+  .\new-runner.ps1 cleanup                                 # reclaim disk: stopped containers, dangling images, old build cache
+
+.NOTES
+  Runners mount /var/run/docker.sock, so any `docker build`/`docker run` a job does
+  lands on the HOST Docker daemon, not inside the ephemeral runner container. That
+  cache and those layers never get cleaned by the runner exiting - run `cleanup`
+  regularly (see README for scheduling it as a daily Task Scheduler job).
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('new', 'list', 'scale', 'down', 'prune')]
+    [ValidateSet('new', 'list', 'scale', 'down', 'prune', 'cleanup')]
     [string]$Action = 'new',
     [string]$Repo,                       # OWNER/NAME
     [int]$Count = 1,
     [switch]$Start,
     [string]$Labels = 'self-hosted,linux,docker',
-    [string]$RunnersDir = $(if ($env:GH_RUNNERS_DIR) { $env:GH_RUNNERS_DIR } else { 'C:\gh-runners' })
+    [string]$RunnersDir = $(if ($env:GH_RUNNERS_DIR) { $env:GH_RUNNERS_DIR } else { 'C:\gh-runners' }),
+    [string]$OlderThan = '24h'           # cleanup: age filter for unused images/build cache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,6 +91,14 @@ switch ($Action) {
         if (Test-Path (Join-Path $dir 'docker-compose.yml')) { Invoke-Compose $dir @('down', '--volumes') }
         if (Test-Path $dir) { Remove-Item $dir -Recurse -Force; Write-Host "Removed $dir" }
         Write-Host "Offline runners may remain in GitHub: Settings > Actions > Runners."
+    }
+    'cleanup' {
+        Write-Host "Pruning stopped containers..."
+        docker container prune -f
+        Write-Host "Pruning dangling images..."
+        docker image prune -f
+        Write-Host "Pruning build cache older than $OlderThan..."
+        docker builder prune -f --filter "until=$OlderThan"
     }
     'list' {
         if (-not (Test-Path $RunnersDir)) { Write-Host "No runners yet ($RunnersDir)"; return }

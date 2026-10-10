@@ -31,8 +31,45 @@ The PAT is read from `$env:GH_RUNNER_PAT` or prompted for. Use a **fine-grained 
 | `.\new-runner.ps1 scale -Repo O/R -Count N` | change runner count (0 = stop) |
 | `.\new-runner.ps1 down -Repo O/R` | stop and remove containers |
 | `.\new-runner.ps1 prune -Repo O/R` | `down` + delete the folder (incl. PAT) |
+| `.\new-runner.ps1 cleanup [-OlderThan 24h]` | reclaim host disk space (see below) |
 
 Updating the kit: `git pull`, then rerun `new` or `scale`; the compose file is refreshed, the existing `.env` is kept.
+
+## Disk cleanup
+
+`docker.sock` is mounted into every runner (see Security notes), so any `docker build`/`docker run`
+a job does lands on the **host** Docker daemon — not inside the ephemeral runner container. Build
+cache and image layers from those jobs pile up on the host disk and are never touched when a
+runner exits, however many jobs run. On a busy day this can grow by tens of GB.
+
+Run `.\new-runner.ps1 cleanup` to reclaim it: stops/removes dead containers, dangling images, and
+build cache older than `-OlderThan` (default `24h`). Safe to run anytime; it never touches a
+running container or an image a running container uses.
+
+A Windows Task Scheduler task named **`gh-runner-kit cleanup`** runs it automatically: daily at
+03:00, and again 3 minutes after every logon (so a machine that isn't on overnight still gets
+cleaned up once it's turned on and Docker Desktop has had time to start). `-StartWhenAvailable`
+means a missed 03:00 run (machine off/asleep) fires as soon as the machine is next on.
+
+To (re)create that task:
+
+```powershell
+$action       = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\gh-runner-kit\new-runner.ps1" cleanup'
+$triggerDaily = New-ScheduledTaskTrigger -Daily -At 3am
+$triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+$triggerLogon.Delay = 'PT3M'
+$settings     = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'gh-runner-kit cleanup' -Action $action `
+  -Trigger @($triggerDaily, $triggerLogon) -Settings $settings -RunLevel Highest
+```
+
+Or run it by hand anytime: `.\new-runner.ps1 cleanup`.
+
+If the host disk still runs low despite regular cleanup, the WSL2 virtual disk
+(`%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`) may need compacting too: `wsl --shutdown`,
+then `Optimize-VHD -Path <path> -Mode Full` (Hyper-V module) or `diskpart` → `compact vdisk`.
+Pruning alone frees space *inside* Docker; the VHDX file on Windows only shrinks when compacted.
 
 ## Using the runners in a workflow
 
