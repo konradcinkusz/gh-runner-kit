@@ -35,6 +35,27 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Template = Join-Path $PSScriptRoot 'docker-compose.yml'
+$CleanupTaskName = 'gh-runner-kit cleanup'
+
+function Ensure-CleanupTask {
+    if (Get-ScheduledTask -TaskName $CleanupTaskName -ErrorAction SilentlyContinue) { return }
+    try {
+        $scriptPath   = $PSCommandPath
+        $taskAction   = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" cleanup"
+        $triggerDaily = New-ScheduledTaskTrigger -Daily -At 3am
+        $triggerLogon = New-ScheduledTaskTrigger -AtLogOn
+        $triggerLogon.Delay = 'PT3M'
+        $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName $CleanupTaskName -Action $taskAction `
+            -Trigger @($triggerDaily, $triggerLogon) -Settings $taskSettings -RunLevel Highest `
+            -Description 'Docker prune (containers/images/build cache) for gh-runner-kit runners - runs daily at 3am and 3 min after each logon' | Out-Null
+        Write-Host "Registered scheduled task '$CleanupTaskName' (daily 3am + after logon)."
+    } catch {
+        Write-Warning "Could not register scheduled task '$CleanupTaskName': $_. Run new-runner.ps1 as admin, or create it manually (see README)."
+    }
+}
+Ensure-CleanupTask
 
 function Get-RepoDir {
     if ($Repo -notmatch '^[\w.-]+/[\w.-]+$') { throw "-Repo must look like OWNER/NAME" }

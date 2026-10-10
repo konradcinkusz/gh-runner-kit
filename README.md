@@ -46,12 +46,16 @@ Run `.\new-runner.ps1 cleanup` to reclaim it: stops/removes dead containers, dan
 build cache older than `-OlderThan` (default `24h`). Safe to run anytime; it never touches a
 running container or an image a running container uses.
 
-A Windows Task Scheduler task named **`gh-runner-kit cleanup`** runs it automatically: daily at
-03:00, and again 3 minutes after every logon (so a machine that isn't on overnight still gets
-cleaned up once it's turned on and Docker Desktop has had time to start). `-StartWhenAvailable`
-means a missed 03:00 run (machine off/asleep) fires as soon as the machine is next on.
+Every invocation of `new-runner.ps1` (any action) checks for a Windows Task Scheduler task named
+**`gh-runner-kit cleanup`** and registers it if missing — so it's set up automatically the first
+time you ever run the script, and left alone (not re-created or duplicated) on every run after
+that. It runs the `cleanup` action daily at 03:00, and again 3 minutes after every logon (so a
+machine that isn't on overnight still gets cleaned up once it's turned on and Docker Desktop has
+had time to start). `-StartWhenAvailable` means a missed 03:00 run (machine off/asleep) fires as
+soon as the machine is next on.
 
-To (re)create that task:
+If registration ever fails (e.g. not run with sufficient rights) you'll see a warning; create it
+by hand with:
 
 ```powershell
 $action       = New-ScheduledTaskAction -Execute 'powershell.exe' `
@@ -64,7 +68,7 @@ Register-ScheduledTask -TaskName 'gh-runner-kit cleanup' -Action $action `
   -Trigger @($triggerDaily, $triggerLogon) -Settings $settings -RunLevel Highest
 ```
 
-Or run it by hand anytime: `.\new-runner.ps1 cleanup`.
+Or run the cleanup itself by hand anytime: `.\new-runner.ps1 cleanup`.
 
 If the host disk still runs low despite regular cleanup, the WSL2 virtual disk
 (`%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`) may need compacting too: `wsl --shutdown`,
