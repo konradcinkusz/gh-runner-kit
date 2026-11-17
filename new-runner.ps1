@@ -114,12 +114,21 @@ switch ($Action) {
         Write-Host "Offline runners may remain in GitHub: Settings > Actions > Runners."
     }
     'cleanup' {
-        Write-Host "Pruning stopped containers..."
-        docker container prune -f
-        Write-Host "Pruning dangling images..."
-        docker image prune -f
-        Write-Host "Pruning build cache older than $OlderThan..."
-        docker builder prune -f --filter "until=$OlderThan"
+        $logFile = Join-Path $RunnersDir 'cleanup.log'
+        New-Item -ItemType Directory -Force $RunnersDir | Out-Null
+        function Invoke-CleanupStep([string]$Title, [string[]]$DockerArgs) {
+            Write-Host "$Title..."
+            $ErrorActionPreference = 'Continue'
+            $out = (& docker @DockerArgs 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            if ($out.Trim()) { Write-Host $out.Trim() }
+            $reclaimed = if ($out -match 'Total reclaimed space:\s*(\S+)') { $Matches[1] } else { 'n/a' }
+            Add-Content -Path $logFile -Value ('{0:yyyy-MM-dd HH:mm:ss} {1}: reclaimed {2}' -f (Get-Date), $Title, $reclaimed)
+        }
+        Invoke-CleanupStep 'stopped containers' @('container', 'prune', '-f')
+        Invoke-CleanupStep 'dangling images'    @('image', 'prune', '-f')
+        Invoke-CleanupStep "build cache older than $OlderThan" @('builder', 'prune', '-f', '--filter', "until=$OlderThan")
+        $lines = @(Get-Content $logFile -ErrorAction SilentlyContinue)   # keep the log small
+        if ($lines.Count -gt 1000) { $lines | Select-Object -Last 500 | Set-Content $logFile }
     }
     'list' {
         if (-not (Test-Path $RunnersDir)) { Write-Host "No runners yet ($RunnersDir)"; return }

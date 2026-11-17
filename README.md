@@ -3,6 +3,7 @@
 Template and helper script for running **ephemeral, self-hosted GitHub Actions runners in Docker**, one small set per repository, on a Windows machine with Docker Desktop.
 
 - `docker-compose.yml` – shared runner definition (image `myoung34/github-runner`).
+- `panel.ps1` + `panel.html` – local browser control panel (see below).
 - `new-runner.ps1` – creates a per-repo folder, writes its `.env`, starts/scales/stops runners.
 - `.env.example` – shape of the per-repo `.env` (the real one lives **outside** this repo).
 
@@ -74,6 +75,27 @@ If the host disk still runs low despite regular cleanup, the WSL2 virtual disk
 (`%LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx`) may need compacting too: `wsl --shutdown`,
 then `Optimize-VHD -Path <path> -Mode Full` (Hyper-V module) or `diskpart` → `compact vdisk`.
 Pruning alone frees space *inside* Docker; the VHDX file on Windows only shrinks when compacted.
+
+## Control panel
+
+```powershell
+.\panel.ps1            # opens http://127.0.0.1:8787 in your browser
+```
+
+A local, browser-based panel over the same per-repo folders (`C:\gh-runners`). No install, no
+background task: it runs while the window is open (Ctrl+C stops it) and listens on `127.0.0.1`
+only; every API call needs a per-start random token, so other websites cannot drive it.
+
+- **Per repo:** containers, GitHub runners online / busy / offline, queued and in-progress jobs
+  (needs *Actions: Read* on the PAT; optional), disk used by the repo's containers.
+- **Actions:** Start / change count, Stop, "Refresh runners" (recreate idle containers), delete dead
+  (offline) registrations. **Busy runners are never stopped, removed or recreated** - a job is
+  detected by its `Runner.Worker` process; if that cannot be checked, the container counts as busy.
+- **Disk:** real Docker usage, VHDX size, free space on C:, the cleanup log + "Clean now", and a
+  copy-ready compact command (admin shell required, so the panel never runs it).
+
+Options: `-Port 9000`, `-RunnersDir D:\runners`, `-NoBrowser`. The PAT stays on the machine; the
+browser never sees it. `cleanup` now appends what it reclaimed to `<RunnersDir>\cleanup.log`.
 
 ## Using the runners in a workflow
 
