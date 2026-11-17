@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel runnerów</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1c2330; --muted: #667085; --line: #e3e6ec;
+    --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --track: #e8ebf1; --code: #f0f2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b1f28; --text: #e6e9ef; --muted: #98a1b3; --line: #2b3140;
+      --accent: #5b8def; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --track: #2b3140; --code: #14171e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 18px 20px 60px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 26px 0 10px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 2px; font-size: 15px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; word-break: break-all; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+  .stat { background: var(--code); border-radius: 8px; padding: 7px 9px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { color: var(--muted); font-size: 11px; }
+  .stat.ok b { color: var(--ok); } .stat.warn b { color: var(--warn); } .stat.bad b { color: var(--bad); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .kv { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .kv b { color: var(--text); font-weight: 600; }
+  button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: progress; }
+  input[type=number] { width: 64px; font: inherit; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .bar { height: 10px; background: var(--track); border-radius: 6px; overflow: hidden; margin: 6px 0 2px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .bar > i.warn { background: var(--warn); } .bar > i.bad { background: var(--bad); }
+  pre { background: var(--code); border-radius: 8px; padding: 9px 11px; margin: 8px 0 0; overflow: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .note { color: var(--warn); font-size: 12px; margin-top: 8px; }
+  .err { color: var(--bad); font-size: 12px; margin-top: 8px; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); }
+  #toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 10px 14px; border-radius: 8px; background: var(--text); color: var(--bg); box-shadow: 0 4px 18px #0004; display: none; white-space: pre-wrap; }
+  #toast.bad { background: var(--bad); color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Panel runnerów</h1>
+  <span class="meta" id="updated">ładowanie…</span>
+  <button id="reload">Odśwież</button>
+</header>
+<main>
+  <h2>Dysk</h2>
+  <div class="grid" id="disk"></div>
+
+  <h2>Repozytoria</h2>
+  <div class="grid" id="repos"></div>
+  <p class="sub" id="empty" hidden>Brak repozytoriów w katalogu runnerów. Dodaj pierwsze: <code>.\new-runner.ps1 -Repo OWNER/NAZWA -Count 1 -Start</code></p>
+</main>
+<div id="toast"></div>
+
+<script>
+const TOKEN = "__PANEL_TOKEN__";
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const gb = (b) => b == null ? "—" : (b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : (b / 1e6).toFixed(0) + " MB");
+const desired = {};     // repo name -> value of the count input (survives re-render)
+let busyOps = 0, lastState = null, loading = false;
+
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-Panel-Token": TOKEN, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+let toastTimer;
+function toast(msg, bad) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = bad ? "bad" : ""; t.style.display = "block";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.display = "none"), bad ? 9000 : 5000);
+}
+
+function bar(used, total) {
+  if (!total) return "";
+  const pct = Math.min(100, (used / total) * 100);
+  return `<div class="bar"><i class="${pct > 90 ? "bad" : pct > 75 ? "warn" : ""}" style="width:${pct.toFixed(1)}%"></i></div>`;
+}
+
+function renderDisk(s) {
+  const d = s.disk, c = s.cleanup;
+  const usedC = d.cTotal != null ? d.cTotal - d.cFree : null;
+  const vhdxWaste = d.vhdxBytes != null ? Math.max(0, d.vhdxBytes - d.dockerUsed) : null;
+  const log = (c.log || []).map(esc).join("\n") || "(brak wpisów)";
+  const task = c.task
+    ? `Zadanie „gh-runner-kit cleanup”: ${esc(c.task.state)}${c.task.lastRun ? ", ostatnio " + esc(c.task.lastRun.replace("T", " ")) : ""}`
+    : `Zadanie „gh-runner-kit cleanup” nie jest zarejestrowane (uruchom new-runner.ps1 jako admin).`;
+  $("#disk").innerHTML = `
+    <div class="card">
+      <h3>Docker</h3>
+      <div class="kv"><span>Realne zużycie (obrazy + kontenery + cache)</span><b>${gb(d.dockerUsed)}</b></div>
+      <div class="kv"><span>Do odzyskania sprzątaniem</span><b>${gb(d.dockerReclaimable)}</b></div>
+      <div class="kv"><span>Plik dysku Dockera (vhdx)</span><b>${gb(d.vhdxBytes)}</b></div>
+      <div class="kv"><span>Do odzyskania przez compact (ok.)</span><b>${gb(vhdxWaste)}</b></div>
+      ${bar(d.dockerUsed, d.vhdxBytes)}
+      <details><summary>Podział</summary><table>${(d.breakdown || []).map((p) => `<tr><td>${esc(p.type)}</td><td>${gb(p.size)}</td><td>do odzysku ${gb(p.reclaimable)}</td></tr>`).join("")}</table></details>
+    </div>
+    <div class="card">
+      <h3>Dysk C:</h3>
+      <div class="kv"><span>Wolne</span><b>${gb(d.cFree)}</b></div>
+      <div class="kv"><span>Razem</span><b>${gb(d.cTotal)}</b></div>
+      ${usedC != null ? bar(usedC, d.cTotal) : ""}
+      <div class="sub" style="margin-top:10px">Compact pliku Dockera (wymaga PowerShella jako administrator, zatrzymuje Docker i runnery — panel go sam nie uruchomi):</div>
+      <pre id="compact">${esc(d.compactCommand)}</pre>
+      <div class="row"><button id="copy">Kopiuj polecenie</button></div>
+    </div>
+    <div class="card">
+      <h3>Sprzątacz</h3>
+      <div class="sub">${task}</div>
+      <pre>${log}</pre>
+      <div class="row"><button class="primary" id="cleanup">Posprzątaj teraz</button></div>
+    </div>`;
+}
+
+function repoCard(r) {
+  const g = r.github || {};
+  const stat = (v, label, cls = "") => `<div class="stat ${cls}"><b>${v ?? "—"}</b><span>${label}</span></div>`;
+  const val = desired[r.name] ?? Math.max(r.running, 1);
+  const dead = g.offline || 0;
+  const containers = (r.containers || []).map((c) =>
+    `<tr><td>${esc(c.name)}</td><td>${esc(c.state)}</td><td>${c.state === "running" ? (c.busy ? "zajęty" : "wolny") : "—"}</td><td>${gb(c.sizeBytes)}</td></tr>`).join("");
+  return `<div class="card" data-repo="${esc(r.name)}">
+    <h3>${esc(r.repo || r.name)}</h3>
+    <div class="sub">${esc(r.name)} · etykiety: ${esc(r.labels || "—")}</div>
+    <div class="stats">
+      ${stat(r.running, "kontenery", r.running ? "ok" : "")}
+      ${stat(g.ok ? g.online : null, "online", g.online ? "ok" : "")}
+      ${stat(g.ok ? g.busy : null, "zajęte", g.busy ? "warn" : "")}
+      ${stat(g.ok ? g.offline : null, "offline", g.offline ? "bad" : "")}
+    </div>
+    <div class="kv"><span>Joby w kolejce / w toku</span><b>${g.queued ?? "—"} / ${g.inProgress ?? "—"}</b></div>
+    <div class="kv"><span>Kontenery tego repo (dysk)</span><b>${gb(r.sizeBytes)}</b></div>
+    ${g.error ? `<div class="err">GitHub: ${esc(g.error)}</div>` : ""}
+    ${g.ok && g.queued == null ? `<div class="note">Kolejka niedostępna: token potrzebuje uprawnienia Actions: Read.</div>` : ""}
+    <div class="row">
+      <input type="number" min="1" max="32" value="${val}" data-count aria-label="Liczba runnerów">
+      <button class="primary" data-act="${r.running ? "scale" : "start"}">${r.running ? "Zmień liczbę" : "Start"}</button>
+      <button data-act="stop" ${r.running ? "" : "disabled"}>Stop</button>
+      <button data-act="refresh" ${r.running ? "" : "disabled"} title="Odtwarza wolne kontenery (zeruje zajętość/stan)">Odśwież runnery</button>
+      <button class="danger" data-act="remove-dead" ${dead ? "" : "disabled"}>Usuń martwe (${dead})</button>
+    </div>
+    <div class="sub" style="margin:8px 0 0">Zajęte runnery nigdy nie są zatrzymywane ani odtwarzane.</div>
+    ${containers ? `<details><summary>Kontenery (${r.containers.length})</summary><table><tr><th>Nazwa</th><th>Stan</th><th>Job</th><th>Rozmiar</th></tr>${containers}</table></details>` : ""}
+  </div>`;
+}
+
+function render(s) {
+  lastState = s;
+  renderDisk(s);
+  $("#repos").innerHTML = s.repos.map(repoCard).join("");
+  $("#empty").hidden = s.repos.length > 0;
+  $("#updated").textContent = "Aktualizacja: " + s.time.replace("T", " ") + " · " + s.runnersDir;
+  $("#dot").className = "dot ok";
+}
+
+async function load(force) {
+  if (loading || busyOps) return;
+  if (document.activeElement && document.activeElement.matches("input[data-count]")) return; // don't wipe typing
+  loading = true;
+  try { render(await api("/api/state" + (force ? "?force=1" : ""))); }
+  catch (e) { $("#dot").className = "dot bad"; $("#updated").textContent = "Błąd: " + e.message; }
+  finally { loading = false; }
+}
+
+async function run(btn, fn) {
+  busyOps++;
+  const scope = btn.closest(".card");
+  const all = scope.querySelectorAll("button"); all.forEach((b) => (b.disabled = true));
+  try { const res = await fn(); toast(res.message || "OK"); }
+  catch (e) { toast(e.message, true); }
+  finally { busyOps--; await load(true); }
+}
+
+document.addEventListener("input", (e) => {
+  if (e.target.matches("input[data-count]")) desired[e.target.closest("[data-repo]").dataset.repo] = e.target.value;
+});
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  if (btn.id === "reload") return load(true);
+  if (btn.id === "copy") {
+    const text = $("#compact").textContent;
+    return (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(() => toast("Skopiowano"), () => { const r = document.createRange(); r.selectNodeContents($("#compact")); getSelection().removeAllRanges(); getSelection().addRange(r); toast("Zaznaczono — skopiuj Ctrl+C"); });
+  }
+  if (btn.id === "cleanup") {
+    return run(btn, () => api("/api/cleanup", "POST"));
+  }
+  const act = btn.dataset.act; if (!act) return;
+  const card = btn.closest("[data-repo]"), name = card.dataset.repo;
+  const count = parseInt(card.querySelector("[data-count]").value, 10);
+  if ((act === "start" || act === "scale") && !(count >= 1 && count <= 32)) return toast("Liczba runnerów: 1–32", true);
+  if (act === "stop" && !confirm(`Zatrzymać wolne runnery ${name}? (zajęte zostaną dokończone)`)) return;
+  if (act === "remove-dead" && !confirm(`Usunąć z GitHuba wszystkie offline'owe rejestracje ${name}?`)) return;
+  run(btn, () => api(`/api/repo/${encodeURIComponent(name)}/${act}`, "POST", { count }));
+});
+
+load(true);
+setInterval(() => load(false), 15000);
+</script>
+</body>
+</html>
